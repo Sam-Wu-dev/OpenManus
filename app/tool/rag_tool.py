@@ -1,104 +1,92 @@
 import asyncio
 import httpx
+import json
 from typing import Optional
-
-# Assuming these come from your project.
+from app.logger import logger
 from app.exceptions import ToolError
 from app.tool.base import BaseTool, CLIResult
 
 _RAG_DESCRIPTION = """Perform Retrieval Augmented Generation (RAG) operations.
-You should use this tool when the encounter large file.
-Functions:
-1. list_resources: Returns a list of available resource identifiers.
-2. search: Uses a resource identity and query string to search for relevant data.
+You should use this tool when encountering large files.
+Function:
+Search: Uses a resource identity (mapped to paper_id) and a query string (mapped to question) to search via the QA endpoint.
 """
 
 
 class RAG(BaseTool):
     name: str = "rag"
     description: str = _RAG_DESCRIPTION
-    # Define a simple JSON schema for the tool's parameters if needed.
     parameters: dict = {
         "type": "object",
         "properties": {
-            "list_resources": {
-                "type": "boolean",
-                "description": "Set to true to list available resource identifiers.",
-            },
             "identity": {
                 "type": "string",
-                "description": "The resource identity to search.",
+                "description": "The resource identity to search (will be sent as paper_id).",
             },
             "query": {
                 "type": "string",
-                "description": "The query string to search within the resource.",
+                "description": "The query string to search within the resource (will be sent as question).",
             },
         },
-        "oneOf": [
-            {"required": ["list_resources"]},
-            {"required": ["identity", "query"]},
-        ],
+        "required": ["identity", "query"],
     }
 
-    # Base URL for the local FastAPI backend.
     BASE_URL: str = "http://140.113.24.140:8112"
-
-    async def list_resources(self) -> CLIResult:
-        """
-        Call the FastAPI endpoint to list resource identifiers.
-        """
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(f"{self.BASE_URL}/resources")
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise ToolError(f"Error listing resources: {exc}") from exc
-            resources = response.json()
-        return CLIResult(output=resources)
 
     async def search(self, identity: str, query: str) -> CLIResult:
         """
-        Call the FastAPI endpoint to search a resource.
+        Call the FastAPI /qa endpoint with a POST request.
+        Maps 'identity' to 'paper_id' and 'query' to 'question'.
         """
-        params = {"identity": identity, "query": query}
-        async with httpx.AsyncClient() as client:
+        payload = {"paper_id": identity, "question": query}
+        logger.info(f"Sending payload: {payload} to {self.BASE_URL}/qa")
+        timeout = httpx.Timeout(
+            60.0
+        )  # sets a 60-second timeout for connect, read, etc.
+        async with httpx.AsyncClient(timeout=timeout) as client:
             try:
-                response = await client.get(f"{self.BASE_URL}/search", params=params)
+                response = await client.post(f"{self.BASE_URL}/qa", json=payload)
                 response.raise_for_status()
             except httpx.HTTPError as exc:
-                raise ToolError(f"Error searching resource: {exc}") from exc
+                status = exc.response.status_code if exc.response else "No status"
+                content = exc.response.text if exc.response else "No content"
+                logger.error(f"HTTP error occurred (status {status}): {content}")
+                raise ToolError(f"Error performing QA search: HTTP {status}") from exc
             result = response.json()
-        return CLIResult(output=result)
+        # Convert the result dictionary to a JSON string to avoid __str__ errors.
+        result_str = json.dumps(result)
+        return CLIResult(output=result_str)
 
     async def execute(
         self,
-        list_resources: Optional[bool] = None,
         identity: Optional[str] = None,
         query: Optional[str] = None,
         **kwargs,
     ) -> CLIResult:
         """
         Execute the RAG tool.
-        - If 'list_resources' is True, list all resources.
-        - Otherwise, perform a search using 'identity' and 'query'.
+        Perform a search using 'identity' (as paper_id) and 'query' (as question).
         """
-        if list_resources:
-            return await self.list_resources()
-        elif identity is not None and query is not None:
+        logger.info(f"Executing RAG tool with identity: {identity}, query: {query}")
+        if identity is not None and query is not None:
             return await self.search(identity, query)
         else:
-            raise ToolError(
-                "Invalid parameters. Provide either list_resources=True or both identity and query."
-            )
+            error_msg = "Invalid parameters. Provide both identity and query."
+            logger.error(error_msg)
+            raise ToolError(error_msg)
 
 
 # Example usage:
 if __name__ == "__main__":
     rag_tool = RAG()
-    # Example: list resources
-    result = asyncio.run(rag_tool.execute(list_resources=True))
-    print("Resources:", result.output)
-
-    # Example: search within a resource.
-    search_result = asyncio.run(rag_tool.execute(identity="resource1", query="cat"))
-    print("Search Results:", search_result.output)
+    try:
+        search_result = asyncio.run(
+            rag_tool.execute(
+                identity="1503.03585v8",
+                query="What is the core method_v2 of this paper?",
+            )
+        )
+        logger.info(f"Search Results: {search_result.output}")
+        print("Search Results:", search_result.output)
+    except Exception as e:
+        logger.error(f"An error occurred during execution: {e}")
