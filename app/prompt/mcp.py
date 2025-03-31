@@ -23,6 +23,7 @@ Remember to clearly explain your reasoning and actions to the user.
 NEXT_STEP_PROMPT = """Based on the current state and available tools, what should be done next?
 Think step by step about the problem and identify which MCP tool would be most helpful for the current stage.
 If you've already made progress, consider what additional information you need or what actions would move you closer to completing the task.
+If you need user input, output your message with the marker [USER_INPUT_REQUIRED] followed by your request.
 """
 
 # Additional specialized prompts

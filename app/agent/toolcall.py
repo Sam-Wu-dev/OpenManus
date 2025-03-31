@@ -71,10 +71,29 @@ class ToolCallAgent(ReActAgent):
                 return False
             raise
 
+        # Extract tool calls and content from the response.
         self.tool_calls = tool_calls = (
             response.tool_calls if response and response.tool_calls else []
         )
         content = response.content if response and response.content else ""
+
+        # Check if the LLM is explicitly asking for user input.
+        if "[USER_INPUT_REQUIRED]" in content:
+            logger.info("LLM requested user input.")
+            # Remove the marker from the content for display.
+            display_content = content.replace("[USER_INPUT_REQUIRED]", "").strip()
+            # Prompt user directly using input(), showing the content.
+            user_input = input(
+                f"{display_content} Agent is waiting for user input. Please provide the required input: "
+            )
+            # Log the user input.
+            logger.info(f"User input received: {user_input}")
+            # Add the user's response to memory.
+            self.memory.add_message(Message.user_message(user_input))
+            # Optionally, update content if needed.
+            content = display_content
+            # Return False so that the current step ends; subsequent steps will include the new input.
+            return False
 
         # Log response info
         logger.info(f"✨ {self.name}'s thoughts: {content}")
