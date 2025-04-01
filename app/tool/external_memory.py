@@ -1,6 +1,6 @@
 import uuid
 import aiosqlite
-from typing import Literal, Optional
+from typing import Literal, Optional, Union, List
 
 from app.tool.base import BaseTool
 
@@ -9,11 +9,11 @@ DB_PATH = "/home/shaosen/LLM/OpenManus/db/memory_store.db"
 
 class ExternalMemory(BaseTool):
     name: str = "external_memory"
-    description: str = """Store or retrieve long content using a memory_id.
+    description: str = """Store or retrieve long content using one or more memory_id values.
 
 Actions:
 - 'store': Save long content and return a memory_id.
-- 'retrieve': Fetch previously stored content using a memory_id.
+- 'retrieve': Fetch previously stored content using one or more memory_id values.
 """
     parameters: dict = {
         "type": "object",
@@ -28,8 +28,11 @@ Actions:
                 "description": "Content to store. Required for 'store' action.",
             },
             "memory_id": {
-                "type": "string",
-                "description": "Memory ID to retrieve. Required for 'retrieve' action.",
+                "oneOf": [
+                    {"type": "string"},
+                    {"type": "array", "items": {"type": "string"}},
+                ],
+                "description": "Memory ID or list of memory IDs to retrieve. Required for 'retrieve' action.",
             },
         },
         "required": ["action"],
@@ -43,7 +46,7 @@ Actions:
         self,
         action: Literal["store", "retrieve"],
         content: Optional[str] = None,
-        memory_id: Optional[str] = None,
+        memory_id: Optional[Union[str, List[str]]] = None,
     ) -> str:
         try:
             async with aiosqlite.connect(DB_PATH) as db:
@@ -55,22 +58,37 @@ Actions:
                 )
 
                 if action == "store":
-                    memory_id = str(uuid.uuid4())
+                    new_id = str(uuid.uuid4())
                     await db.execute(
                         "INSERT INTO memory (id, content) VALUES (?, ?)",
-                        (memory_id, content),
+                        (new_id, content),
                     )
                     await db.commit()
-                    return f"🔐 Content stored. memory_id: {memory_id}"
+                    return f"🔐 Content stored. memory_id: {new_id}"
 
                 elif action == "retrieve":
+                    # Normalize to list
+                    if isinstance(memory_id, str):
+                        memory_id_list = [memory_id]
+                    elif isinstance(memory_id, list):
+                        memory_id_list = memory_id
+                    else:
+                        return "❗ Invalid memory_id format."
+
+                    placeholders = ",".join("?" for _ in memory_id_list)
                     async with db.execute(
-                        "SELECT content FROM memory WHERE id = ?", (memory_id,)
+                        f"SELECT id, content FROM memory WHERE id IN ({placeholders})",
+                        memory_id_list,
                     ) as cursor:
-                        row = await cursor.fetchone()
-                        if row is None:
-                            return f"❌ No content found for memory_id: {memory_id}"
-                        return f"🧠 Retrieved content for {memory_id}:\n{row[0]}"
+                        rows = await cursor.fetchall()
+
+                    if not rows:
+                        return "❌ No content found for the provided memory_id(s)."
+
+                    results = "\n\n".join(
+                        f"🧠 {mid}:\n{content}" for mid, content in rows
+                    )
+                    return results
 
                 else:
                     return "❓ Invalid action."
