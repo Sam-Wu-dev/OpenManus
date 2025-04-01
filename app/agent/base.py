@@ -8,6 +8,8 @@ from app.llm import LLM
 from app.logger import logger
 from app.sandbox.client import SANDBOX_CLIENT
 from app.schema import ROLE_TYPE, AgentState, Memory, Message
+import copy
+import re
 
 
 class BaseAgent(BaseModel, ABC):
@@ -187,10 +189,43 @@ class BaseAgent(BaseModel, ABC):
 
     @property
     def messages(self) -> List[Message]:
-        """Retrieve a list of messages from the agent's memory."""
         return self.memory.messages
 
     @messages.setter
     def messages(self, value: List[Message]):
         """Set the list of messages in the agent's memory."""
         self.memory.messages = value
+
+    async def get_messages(self) -> List[Message]:
+        """Retrieve a copy of messages, resolving external memory without mutating the original."""
+        messages_copy = copy.deepcopy(self.memory.messages)
+
+        if len(messages_copy) < 2 or messages_copy[-2].role != "tool":
+            return messages_copy
+
+        last_tool_msg = messages_copy[-2]
+
+        # Check for memory_id pattern
+        if (
+            last_tool_msg.content
+            and "memory_id:" in last_tool_msg.content
+            and "Result too long to display here." in last_tool_msg.content
+        ):
+            match = re.search(r"memory_id: ([a-zA-Z0-9\-]+)", last_tool_msg.content)
+            if match:
+                memory_id = match.group(1)
+
+                try:
+                    from app.tool.external_memory import ExternalMemory
+
+                    tool = ExternalMemory()
+                    result = await tool.execute(action="retrieve", memory_id=memory_id)
+
+                    # Replace content in the copy only
+                    last_tool_msg.content = result
+                except Exception as e:
+                    last_tool_msg.content += (
+                        f"\n⚠️ Failed to fetch full result from memory: {e}"
+                    )
+
+        return messages_copy

@@ -20,6 +20,7 @@ from app.tool.browser_use_tool import BrowserUseTool
 from app.tool.str_replace_editor import StrReplaceEditor
 from app.tool.terminate import Terminate
 from app.tool.rag_tool import RAG
+from app.tool.external_memory import ExternalMemory
 
 
 class MCPServer:
@@ -34,6 +35,7 @@ class MCPServer:
         self.tools["browser"] = BrowserUseTool()
         self.tools["editor"] = StrReplaceEditor()
         self.tools["rag"] = RAG()
+        self.tools["ExternalMemory"] = ExternalMemory()
         self.tools["terminate"] = Terminate()
 
     def register_tool(self, tool: BaseTool, method_name: Optional[str] = None) -> None:

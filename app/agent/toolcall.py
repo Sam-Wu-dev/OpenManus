@@ -12,6 +12,7 @@ from app.tool import CreateChatCompletion, Terminate, ToolCollection
 
 
 TOOL_CALL_REQUIRED = "Tool calls required but none provided"
+MAX_OBSERVATION_LENGTH = 500  # characters
 
 
 class ToolCallAgent(ReActAgent):
@@ -42,9 +43,13 @@ class ToolCallAgent(ReActAgent):
             self.messages += [user_msg]
 
         try:
+            messages = await self.get_messages()
+            logger.info("[Current Messages]")
+            for msg in messages:
+                logger.info(f"({msg.role}): {msg.content}")
             # Get response with tool options
             response = await self.llm.ask_tool(
-                messages=self.messages,
+                messages=messages,
                 system_msgs=(
                     [Message.system_message(self.system_prompt)]
                     if self.system_prompt
@@ -194,44 +199,44 @@ class ToolCallAgent(ReActAgent):
             # Parse arguments
             args = json.loads(command.function.arguments or "{}")
 
-            # Execute the tool
-            logger.info(f"🔧 Activating tool: '{name}'...")
+            logger.info(f"🔧 Activating tool: '{name}' with args: {args}")
             result = await self.available_tools.execute(name=name, tool_input=args)
 
             # Handle special tools
             await self._handle_special_tool(name=name, result=result)
 
-            # Check if result is a ToolResult with base64_image
+            result_str = json.dumps(result.output)
+
             if hasattr(result, "base64_image") and result.base64_image:
-                # Store the base64_image for later use in tool_message
                 self._current_base64_image = result.base64_image
 
-                # Format result for display
-                observation = (
-                    f"Observed output of cmd `{name}` executed:\n{str(result)}"
-                    if result
-                    else f"Cmd `{name}` completed with no output"
+            if len(result_str) > MAX_OBSERVATION_LENGTH:
+                logger.info(f"🧠 Result too long, storing via ExternalMemory...")
+                memory_result = await self.available_tools.execute(
+                    name="external_memory",
+                    tool_input={"action": "store", "content": result_str},
                 )
-                return observation
+                return f"Result too long to display here.\n{memory_result}"
 
-            # Format result for display (standard case)
-            observation = (
-                f"Observed output of cmd `{name}` executed:\n{str(result)}"
-                if result
+            return (
+                f"Observed output of cmd `{name}` executed:\n{result_str}"
+                if result_str
                 else f"Cmd `{name}` completed with no output"
             )
 
-            return observation
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             error_msg = f"Error parsing arguments for {name}: Invalid JSON format"
             logger.error(
-                f"📝 Oops! The arguments for '{name}' don't make sense - invalid JSON, arguments:{command.function.arguments}"
+                f"📝 Failed to parse tool arguments for '{name}': {command.function.arguments}"
             )
+            logger.exception(e)
             return f"Error: {error_msg}"
+
         except Exception as e:
-            error_msg = f"⚠️ Tool '{name}' encountered a problem: {str(e)}"
-            logger.exception(error_msg)
-            return f"Error: {error_msg}"
+            logger.error(f"⚠️ Tool '{name}' execution failed.")
+            logger.error(f"📦 Tool arguments: {command.function.arguments}")
+            logger.exception(e)
+            return f"Error: Tool '{name}' encountered a problem: {str(e)}"
 
     async def _handle_special_tool(self, name: str, result: Any, **kwargs):
         """Handle special tool execution and state changes"""

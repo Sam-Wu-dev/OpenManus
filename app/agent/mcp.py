@@ -116,16 +116,16 @@ class MCPAgent(ToolCallAgent):
         # Log and notify about changes
         if added_tools:
             logger.info(f"Added MCP tools: {added_tools}")
-            self.memory.add_message(
-                Message.system_message(f"New tools available: {', '.join(added_tools)}")
-            )
+            # self.memory.add_message(
+            #     Message.system_message(f"New tools available: {', '.join(added_tools)}")
+            # )
         if removed_tools:
             logger.info(f"Removed MCP tools: {removed_tools}")
-            self.memory.add_message(
-                Message.system_message(
-                    f"Tools no longer available: {', '.join(removed_tools)}"
-                )
-            )
+            # self.memory.add_message(
+            #     Message.system_message(
+            #         f"Tools no longer available: {', '.join(removed_tools)}"
+            #     )
+            # )
         if changed_tools:
             logger.info(f"Changed MCP tools: {changed_tools}")
 
